@@ -1,0 +1,92 @@
+---
+title: "Model selection"
+author: "Jasmin Capka"
+date: "11/20/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(rethinking)
+```
+
+m6.6 is the model with just an intercept, m6.7 is the model that includes both treatment and fungus (the post-treatment variable), and m6.8 is the model that includes treatment but omits fungus. It’s m6.8 that allows us to correctly infer the causal influence of treatment.
+
+## Model selection
+
+```{r calculate WAIC}
+set.seed(11)
+WAIC( m6.7)
+```
+
+```{r compare WAIC}
+set.seed(77)
+compare( m6.6,m6.7,m6.8,func=WAIC)
+```
+
+```{r dSE by hand}
+set.seed(91)
+waic_m6.7 <-WAIC(m6.7,pointwise=TRUE)$WAIC
+waic_m6.8 <-WAIC(m6.8,pointwise=TRUE)$WAIC
+n <-length(waic_m6.7)
+diff_m6.7_m6.8 <-waic_m6.7-waic_m6.8
+sqrt( n*var(diff_m6.7_m6.8))
+```
+
+```{r 99% interval of difference}
+40.9 +c(-1,1)*10.4*2.6
+```
+
+```{r plot comparison}
+plot( compare(m6.6,m6.7,m6.8))
+```
+
+```{r compare m6.6, m6.8}
+set.seed(92)
+waic_m6.6 <-WAIC(m6.6,pointwise=TRUE)$WAIC
+diff_m6.6_m6.8 <-waic_m6.6-waic_m6.8
+sqrt( n*var(diff_m6.6_m6.8))
+```
+
+```{r automatically calculate}
+set.seed(93)
+compare( m6.6,m6.7,m6.8)@dSE
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

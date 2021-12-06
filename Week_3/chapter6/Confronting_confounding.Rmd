@@ -1,0 +1,53 @@
+---
+title: "Confronting confounding"
+author: "Jasmin Capka"
+date: "11/20/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(rethinking)
+library(dagitty)
+```
+
+# Shutting the backdoor
+
+```{r example 1}
+library(dagitty)
+dag_6.1 <- dagitty("dag{
+U [unobserved]
+X ->Y
+X <-U<-A->C->Y
+U ->B<-C
+}")
+adjustmentSets(dag_6.1, exposure = "X", outcome = "Y")
+```
+
+```{r example 2}
+library(dagitty)
+dag_6.2 <- dagitty("dag{
+A ->D
+A ->M->D
+A <-S->M
+S ->W->D
+}")
+adjustmentSets(dag_6.2, exposure = "W", outcome = "D")
+```
+
+```{r cond Independencies}
+impliedConditionalIndependencies(dag_6.2)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+

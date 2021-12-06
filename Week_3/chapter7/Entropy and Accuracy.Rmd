@@ -1,0 +1,36 @@
+---
+title: "Multicollinearity"
+author: "Jasmin Capka"
+date: "11/20/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(rethinking)
+```
+
+## Uncertainty through entropy
+
+```{r calculate uncertainty}
+p <-c(0.3,0.7)
+-sum( p*log(p))
+```
+
+## Scoring the right data
+```{r compute log-scores}
+set.seed(1)
+sapply( list(m7.1,m7.2,m7.3,m7.4,m7.5,m7.6),function(m)sum(lppd(m)))
+```
+
+
+
+
+
+
+
+
+
+
+
+

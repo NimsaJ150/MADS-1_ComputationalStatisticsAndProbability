@@ -1,0 +1,20 @@
+---
+title: "Symmetrie of Interactions"
+author: "Jasmin Capka"
+date: "11/28/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(rethinking)
+```
+
+## Symmetry
+
+```{r compute the difference between a nation in Africa and outside Africa, holding its ruggedness constant}
+rugged_seq <- seq(from = -0.2, to = 1.2, length.out = 30)
+muA <- link(m8.3, data = data.frame(cid = 1, rugged_std = rugged_seq))
+muN <- link(m8.3, data = data.frame(cid = 2, rugged_std = rugged_seq))
+delta <- muA - muN
+```
