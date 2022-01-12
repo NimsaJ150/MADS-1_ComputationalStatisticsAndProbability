@@ -1,0 +1,284 @@
+---
+title: "Assignment 3"
+author: "Jasmin Capka"
+date: "11/21/2021"
+output:
+  pdf_document:
+    latex_engine: xelatex
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(rethinking)
+library(dagitty)
+```
+
+# Exercise 1
+
+Loading and inspecting the data:
+
+```{r load data}
+data(foxes)
+d <- foxes
+precis(d)
+```
+
+Given causal DAG:
+
+```{r define DAG}
+# define DAG
+dag_foxes <- dagitty("dag{
+  area -> avgfood
+  avgfood -> groupsize -> weight
+  avgfood -> weight
+}")
+
+# set coordinates
+coordinates(dag_foxes) <- list(x = c(area = 1, avgfood = 0, groupsize = 2, weight = 1),
+                               y = c(area = 0, avgfood = 1, groupsize = 1, weight = 2))
+# draw
+drawdag(dag_foxes)
+```
+
+## Question 1.a):
+
+The first step for all following models is standardizing all variables:
+
+```{r standardize}
+# standardize data
+d$area_std = standardize(d$area)
+d$avgfood_std = standardize(d$avgfood)
+d$weight_std = standardize(d$weight)
+d$groupsize_std = standardize(d$groupsize)
+```
+
+In order to construct a quap model to infer the total causal influence of area on weight, I have to check whether there are covariates I need to adjust:
+
+```{r}
+adjustmentSets(dag_foxes, exposure = "area", outcome = "weight")
+```
+
+There are no variables I need to adjust for as the code above shows. This makes sense as area has two indirect paths linking it to weight and no other variables are influencing area. Therefore, both indirect paths need to be included when modeling the total causal influence of area on weight and no backdoors need to be closed.
+
+In the next step I use prior predictive simulation to show that my model’s predictions will stay within the possible outcome range.
+As all variables are standardized with a mean of 0 and a standard deviation of 1, I use the following priors:
+
+\[weight_i ∼ Normal(\mu_i, \sigma)\]
+\[\mu_i = \alpha + \beta area\_std_i\]
+\[\alpha ∼ Normal(0, 0.5)\]
+\[\beta ∼ Normal(0, 0.5)\]
+\[\sigma ∼ Log-Normal(0, 1)\]
+
+Using prior predictive simulation from 4.3.2 (p.82) of the book with a density plot, shows that most of the predictions stay within the possible outcomes, meaning the minimal value of weight (displayed via the green line) and the max value of weight (displayed via the red line):
+
+```{r prior predictive simulation density}
+N = 116
+
+# define distribution of a and bAR
+a <- rnorm(N, 0, 0.5)
+bAR <- rnorm(N, 0, 0.5)
+
+# sigma and mu
+sample_sigma <- rexp(N, 1)
+sample_mu <- a + bAR * d$area_std
+
+# plot prior predictive simulation
+prior_w <- rnorm(1e4, sample_mu, sample_sigma)
+plot(density(prior_w))
+
+# plot min and max line
+abline(v = max(d$weight_std), col = 2)
+abline(v = min(d$weight_std), col = 3)
+```
+
+Additionally, using prior predictive simulation from page 95 of the book, with individual lines of possible models shows as well that most of the predictions stay within possible outcomes.
+
+```{r prior predictive simulation individual}
+# create graph
+plot(NULL, xlim = range(d$area_std), ylim = range(-3, 3),
+     xlab = "area_std", ylab = "weight_std")
+
+# plot min and max line
+abline(h = max(d$weight_std), col = 2)
+abline(h = min(d$weight_std), col = 3)
+
+# plot individual lines
+mtext("a~dnorm(0, 0.5)\n bAR~dnorm(0, 0.5)")
+for (i in 1:N) curve((a[i] + bAR[i] * x),
+                     from = min(d$area_std), to = max(d$area_std),
+                     add = TRUE,
+                     col = col.alpha("black", 0.2))
+```
+
+Applying those priors, the model can be constructed:
+
+```{r model with area on weight}
+m1a <- quap(
+  alist(
+    weight_std ~ dnorm(mu, sigma),
+    mu <- a + bAR * area_std,
+    a ~ dnorm(0, 1),
+    bAR ~ dnorm(0, 0.5),
+    sigma ~ dexp(1)
+  ), data = d)
+
+precis(m1a, depth = 2)
+```
+
+Looking at this outcome, territory size (area) seems to have no causal influence on the weight of foxes. The mean of bAR is slightly above zero, but looking at the standard deviation and the percentile intervals, bAR is distributed above 0 as well as below. This can be seen in the following plot as well:
+
+```{r plot m1a precis}
+plot(precis(m1a, depth = 2))
+```
+
+Therefore, increasing the area available to each fox has no visible influence on its health (weight).
+
+## Question 1.b):
+
+To estimate the total causal influence of food no covariates need to be adjusted as well. This code below shows this as well:
+
+```{r}
+adjustmentSets(dag_foxes, exposure = "avgfood", outcome = "weight")
+```
+
+There are two paths connecting avgfood with weight. The first one is a direct path. The second path 'avgfood -> groupsize -> weight' is a pipe but, nevertheless, acts as an indirect causal effect for avgfood on weight. Therefore, with the same explanation as for the model in 1.a), when estimating the total causal effect of avgfood on weight, it should be included.
+
+The following model can be constructed (using the same priors as for m1a because of standardization):
+
+```{r model with avgfood on weight}
+m1b <- quap(
+  alist(
+    weight_std ~ dnorm(mu, sigma),
+    mu <- a + bAF * avgfood_std,
+    a ~ dnorm(0, 1),
+    bAF ~ dnorm(0, 1),
+    sigma ~ dexp(1)
+  ), data = d)
+
+precis(m1b, depth = 2)
+```
+
+The distribution of bAF is almost identical to the negative distribution of bAR before. This can be seen in the plot below, as well:
+
+```{r plot m1b precis}
+plot(coeftab(m1a, m1b), par = c("bAR", "bAF"))
+```
+
+This means, that adding food (avgfood) will not make foxes heavier. Avgfood seems to have no visible impact on weight as well.
+
+## Question 1.c):
+
+To estimate the causal influence of groupsize on weight, there are covariates that need to be adjusted:
+
+```{r}
+adjustmentSets(dag_foxes, exposure = "groupsize", outcome = "weight")
+```
+
+The model needs to be conditioned on avgfood. This is because the path 'groupsize <- avgfood -> weight' is a fork. Conditioning on avgfood closes the backdoor.
+
+The following model can be constructed (using the same priors as for m1a because of standardization):
+
+```{r model with groupsize on weight}
+m1c <- quap(
+  alist(
+    weight_std ~ dnorm(mu, sigma),
+    mu <- a + bAF * avgfood_std + bG * groupsize_std,
+    a ~ dnorm(0, 1),
+    bAF ~ dnorm(0, 1),
+    bG ~ dnorm(0, 1),
+    sigma ~ dexp(1)
+  ), data = d)
+
+precis(m1c, depth = 2)
+```
+
+Looking at the posterior distribution, groupsize seems to have a negative effect on weight, because bG has a value of -0.69. Looking at the plot below, even considering the standard deviation, bG is clearly negative when conditioning on avgfood.
+
+```{r plot m1c precis}
+plot(precis(m1c, depth = 2))
+```
+
+Therefore, increasing groupsize decreases weight. This makes sense, because in a larger group of foxes a single fox will get less food, keeping the avgfood constant.
+
+Additionally, bAF is now positive. Thus, increasing the average food seems to increase the weight of a fox, if group size is kept constant. This makes sense as well, when more food is availale, a fox can eat more and gain weight, but it contradicts the result of m1b. In m1b, avgfood had no significant effect on weight. This effect arises, because (as can be seen in the DAG) avgfood also has an influence on groupsize. The more food is available, the larger becomes a group, which decreases weight.
+
+This means, in general, the direct effect of avgfood on weight is to increase weight as can be seen in model m1c. Nevertheless, it also affects groupsize and decreases weight over that indirect path. This results in a non-significant total effect from model m1b.
+This effect arises, because groupsize is a post-treatment variable. The variable groupsize is a consequence of avgfood.
+
+Furthermore, considering the estimates of the effects of area and avgfood from the models before and looking at the data, area and avgfood seem to contain the same information. They both have a similar effect on weight and area has a direct influence on avgfood. This is because an increase in the territory of a group means that avergae amount of food increases as well.
+
+# Exercise 2
+
+The book provides information about both terms on page 226:
+
+Model selection is the process of picking the model with the lowest criterion value compared to other models. It only focuses on that single selected model and pays no attention to the other possible models anymore.
+Model comparison in contrast means using multiple models to better understand how included variables influence predictions and detect causal relationships through implied conditional independencies in a causal model.
+
+Therefore, under model selection, the information about the relative model accuracy gets lost. To get this relative model accuracy other models and their different WAIC/CV/PSIS values are needed. The relative model accuracy indicates how confident one can be about a model conditional on a set of models that are compared. With this information included, model comparison is a more holistic approach allowing to distinguish between different models and their results as well as implications on the initial data.
+
+# Exercise 3
+
+In the first step, all five models are constructed. Model 2, 4 and 5 can be taken from exercise 1.
+
+```{r construct models}
+m3.1 <- quap(
+  alist(
+    weight_std ~ dnorm(mu, sigma),
+    mu <- a +
+      bAF * avgfood_std +
+      bG * groupsize_std +
+      bAR * area_std,
+    a ~ dnorm(0, 1),
+    bAF ~ dnorm(0, 1),
+    bG ~ dnorm(0, 1),
+    bAR ~ dnorm(0, 1),
+    sigma ~ dexp(1)
+  ), data = d)
+
+m3.2 = m1c
+
+m3.3 <- quap(
+  alist(
+    weight_std ~ dnorm(mu, sigma),
+    mu <- a + bAF * avgfood_std + bAR * area_std,
+    a ~ dnorm(0, 1),
+    bAF ~ dnorm(0, 1),
+    bAR ~ dnorm(0, 1),
+    sigma ~ dexp(1)
+  ), data = d)
+
+m3.4 = m1b
+
+m3.5 = m1a
+```
+
+Then I use the WAIC comparison:
+
+```{r calculate WAIC}
+set.seed(11)
+compare(m3.1, m3.2, m3.3, m3.4, m3.5, func = WAIC)
+```
+
+Looking at the differences in WAIC scores, the first two models and the last three models are pretty similar. This gets even more obvious when looking at the graph below.
+
+```{r}
+plot(compare(m3.1, m3.2, m3.3, m3.4, m3.5, func = WAIC))
+```
+
+The difference in WAIC scores between m3.1 and m3.2 is very small with 0.5. Taking the standard error of this difference, which has a value of 3.83 into consideration, they perform similarly. This can be explained with the DAG above, because as area only directly influences avgfood, no further information is added, when adding area to the model. The two variables are strongly correlated and nearly redundant as can be seen in the plot below.
+Therefore, both models can be treated equally regarding their accuracy.
+
+```{r plot area on avgfood}
+plot(area_std ~ avgfood_std, d, col = col.alpha(rangi2, 0.1), pch = 16)
+```
+
+The models m3.4 and m3.5 are about 11 units of deviance smaller model m3.1. They are still having a standard error of this difference of around 8.25. These models also perform similarly, because as mentioned before area and avgfood contain the same information. These two models perform worse than models m3.1 and m3.2 before, because the information about groupsize is missing. Groupsize has a significant negative impact on weight and is able to add further information as can be seen from the DAG, because it has a direct impact on weight.
+
+Model m3.3 has a slightly higher difference in WAIC with the value of 12 than the models m3.4 and m3.5, but an equal standard error in this difference. Again the information about groupsize is missing resulting in a similar accuracy as models m3.4 and m3.5.
+This models contains the redundant variables avgfood and area. Model m3.3 has a difference in WAIC of 1.2 to model m3.4 and of value 1.3 to model m3.5. Nevertheless, looking at the table below, the respective errors are 2.26 and 2.08 for models m3.4 and m3.5. Therefore, these three models can be grouped together which is also supported by the WAIC comparison graph.
+
+```{r}
+compare(m3.1, m3.2, m3.3, m3.4, m3.5, func = WAIC)@dSE
+```
+
+In conclusion, this split in two groups of models results from the inclusion of groupsize as variable in the first group of the models and omission of it in the second group group.

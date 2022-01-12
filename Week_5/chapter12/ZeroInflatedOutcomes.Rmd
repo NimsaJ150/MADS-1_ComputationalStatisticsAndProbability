@@ -1,0 +1,88 @@
+---
+title: "Zero-Inflated Outcomes"
+author: "Jasmin Capka"
+date: "12/6/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(rethinking)
+```
+
+## Zero-inflated Poisson
+
+simulate drinking and working monks:
+
+```{r}
+# define parameters
+prob_drink <-0.2 # 20% of days
+rate_work <-1    # average 1 manuscript per day
+# sample one year of production
+N <-365
+# simulate days monks drink
+set.seed(365)
+drink <-rbinom(N,1,prob_drink)
+# simulate manuscripts completed
+y <-(1-drink)*rpois(N,rate_work)
+```
+
+visualize:
+
+```{r}
+simplehist( y,xlab="manuscripts completed",lwd=4)
+zeros_drink <-sum(drink)
+zeros_work <-sum(y==0&drink==0)
+zeros_total <-sum(y==0)
+lines( c(0,0),c(zeros_work,zeros_total),lwd=4,col=rangi2)
+```
+
+for model:
+
+```{r}
+m12.3 <-ulam(
+alist(
+y ~dzipois(p,lambda),
+logit(p) <-ap,
+log(lambda) <-al,
+ap ~dnorm(-1.5,1),
+al ~dnorm(1,0.5)
+) ,data=list(y=y),chains=4)
+precis( m12.3)
+```
+
+on natural scale:
+
+```{r}
+post <-extract.samples(m12.3)
+mean( inv_logit(post$ap)) # probability drink
+mean( exp(post$al))       # rate finish manuscripts, when not drinking
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

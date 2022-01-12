@@ -1,0 +1,279 @@
+---
+title: "Assignment 5"
+author: "Jasmin Capka"
+date: "12/08/2021"
+output:
+  pdf_document:
+    latex_engine: xelatex
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(rethinking)
+library(dagitty)
+```
+
+As basis for this assignment, I loaded the `Trolley` dataset:
+
+```{r load data}
+data ( Trolley )
+d <- Trolley
+precis ( d )
+```
+
+
+## Exercise 1
+
+### Part 1.a)
+
+Education is associated with moral judgment. Now introducing age, to find out whether this association is causal: Age can have an influence on response through education, as well as directly. This is represented in the following DAG:
+
+```{r define DAG 1}
+# define DAG
+dag_trolley1 <- dagitty("dag{
+  age -> response
+  age -> education -> response
+}")
+
+# set coordinates
+coordinates(dag_trolley1) <- list(x = c(age = 0, education = 2, response = 1),
+                               y = c(age = 0, education = 0, response = 1))
+# draw
+drawdag(dag_trolley1)
+```
+
+Age influences education, as the level of education depends on age. Additionally, age may influence response directly, as age might lead to different attitudes and behaviors among people and thus affect their responses.
+
+### Part 1.b)
+
+To evaluate the causal influence of education on response, a model blocking the backdoor through age (fork: education <- age -> response) is required. This is confirmed by the following code, as well:
+
+```{r find covariates that need to be adjusted for 1}
+adjustmentSets(dag_trolley1, exposure = "education", outcome = "response")
+```
+
+Firstly, I put the data in a list:
+
+```{r}
+edu_levels <- c( 6 , 1 , 8 , 4 , 7 , 2 , 5 , 3 )
+d$edu_new <- edu_levels[ d$edu ]
+
+dat1 <- list(
+  R = d$response,
+  action = d$action,
+  intention = d$intention,
+  contact = d$contact,
+  E = as.integer(d$edu_new), # edu_new as an index
+  age = normalize(d$age),    # normalized age
+  alpha = rep(2, 7)          # delta prior
+)
+```
+
+It is basically the same list as in 12.34 on page 394, except age is added as new variable. I normalized age to be between 0 and 1. This allows using the same prior for age as for the other variables.
+
+Extending the code 12.34 from page 394 (the model with education as categorical predictor) with the model from 12.24 from page 387 (the model containing interaction effects between action/contact and intention), I fit the new model containing age:
+
+```{r fit model m1a, results = 'hide'}
+m1a <- ulam(
+  alist(
+    R ~ ordered_logistic(phi, kappa),
+    phi <- bE * sum(delta_j[1:E]) + bAC * action + BI * intention + bC * contact
+            + bAG * age,
+    BI <- bI + bIA * action + bIC * contact,
+    c(bAC, bC, bE, bAG, bI, bIA, bIC) ~ normal(0, 0.5),
+    vector[8]:delta_j <<- append_row(0, delta),
+    simplex[7]:delta ~ dirichlet(alpha),
+    kappa ~ normal(0, 1.5)
+  ),
+  data = dat1,
+  chains = 4,
+  cores = 4
+)
+```
+
+As the model produced a warning about the Tail Effective Samples Size (ESS) being too low, I used the `traceplot` and `trankplot` functions in order to check the chains for convergence:
+
+```{r check convergence m1a}
+trankplot(m1a)
+traceplot(m1a)
+```
+
+The plots show that the chains are converging for model m1a and, thus, that the model produces a reliable posterior distribution.
+
+To be able to compare and see the influence of age on the relationship between education and response, I also created a model without age as reference. This means the following model is not blocking the backdoor through age:
+
+```{r define data and fit model m1b, results = 'hide'}
+dat2 <- list(
+  R = d$response,
+  action = d$action,
+  intention = d$intention,
+  contact = d$contact,
+  E = as.integer(d$edu_new),
+  alpha = rep(2, 7)
+)
+
+m1b <- ulam(
+  alist(
+    R ~ ordered_logistic(phi, kappa),
+    phi <- bE * sum(delta_j[1:E]) + bAC * action + BI * intention + bC * contact,
+    BI <- bI + bIA * action + bIC * contact,
+    c(bAC, bC, bE, bI, bIA, bIC) ~ normal(0, 0.5),
+    vector[8]:delta_j <<- append_row(0, delta),
+    simplex[7]:delta ~ dirichlet(alpha),
+    kappa ~ normal(0, 1.5)
+  ),
+  data = dat2,
+  chains = 4,
+  cores = 4
+)
+```
+
+In order to check the chains for convergence, I use the `traceplot` and `trankplot` functions again:
+
+```{r check convergence m1b}
+trankplot(m1b)
+traceplot(m1b)
+```
+
+The plots show that the chains are converging for m1b and, thus, that the model produces a reliable posterior distribution.
+
+### Part 1.c)
+
+To draw conclusions concerning the models and the causal effect of education on response, I took a look at the posterior distributions:
+
+```{r inspect m1a, m1b}
+precis(m1a)
+precis(m1b)
+```
+
+In model m1b (without age), education has a negative effect on response. Its parameter (`bE`) is distributed below zero.
+In model m1a (age included), education now has a positive effect on response. The mean of parameter `bE` is 0.21 and, considering the percentile intervals, it has only a slight overlap with zero.
+
+This means that education was probably confounded by age and some of the effect measured for education in model m1b can be assigned to the variable age. Additionally, there might be a causal relationship between age and response, as well as between education and response as both variables have an influence on response.
+
+According to model m1a, age causes people to give lower response values and education causes higher response values.
+
+## Exercise 2
+
+In this exercise, the variable gender is added, having a possible direct influence on education as well as on response.
+Therefore, this DAG now includes response, education, age, and gender:
+
+```{r define DAG 2}
+# define DAG
+dag_trolley2 <- dagitty("dag{
+  age -> response
+  age -> education -> response
+  response <- gender -> education
+}")
+
+# set coordinates
+coordinates(dag_trolley2) <- list(x = c(age = 0, education = 2, gender=3 , response = 1),
+                               y = c(age = 0, education = 0, gender=1, response = 1))
+# draw
+drawdag(dag_trolley2)
+```
+
+It is possible that any of the inferences from exercise 1 are confounded by gender.
+This is because the path `response <- gender -> education` is a fork. Therefore, it is possible that the effect of education on response is still confounded. To check for this, the variable gender needs to be added to the model, as well, to close the backdoor. The code below also confirms that, as well:
+
+```{r find covariates that need to be adjusted for 2}
+adjustmentSets(dag_trolley2, exposure = "education", outcome = "response")
+```
+
+Therefore, I constructed another model containing gender that can be compared with model m1a.
+I added an indicator variable `male` to the data list from model m1a. The variable is 1 when a person is male and 0 when a person is female.
+
+```{r add gender to data}
+dat1$male <- ifelse(d$male==1, 1L, 0L)
+```
+
+Then, I fitted the model:
+
+```{r fit model m2, results = 'hide'}
+m2 <- ulam(
+  alist(
+    R ~ ordered_logistic(phi, kappa),
+    phi <- bE * sum(delta_j[1:E]) + bAC * action + BI * intention + bC * contact 
+            + bAG * age + bM * male,
+    BI <- bI + bIA * action + bIC * contact,
+    c(bAC, bC, bE, bAG, bI, bIA, bIC, bM) ~ normal(0, 0.5),
+    vector[8]:delta_j <<- append_row(0, delta),
+    simplex[7]:delta ~ dirichlet(alpha),
+    kappa ~ normal(0, 1.5)
+  ),
+  data = dat1,
+  chains = 4,
+  cores = 4
+)
+```
+
+In order to check the chains for convergence, I use the `traceplot` and `trankplot` functions again:
+
+```{r check convergence m2}
+trankplot(m2)
+traceplot(m2)
+```
+
+The plots show that the chains are converging and, thus, that the model produces a reliable posterior distribution.
+
+In order to draw conclusions about the causal relationships, I took a look at the posterior of model m2 to be able to compare it to the posterior of model m1a.
+
+```{r inspect m2}
+precis(m2)
+```
+
+Comparing model m1a and m2 with each other, the parameter for education (`bE`) has a mean close to zero and a high standard deviation, spreading from values below to values above zero in model m2 (with gender). The parameter for gender (`bM`) is positively associated with response in model m2.
+
+This means that education in model m1a was probably still confounded by gender and some of the effect measured for education in model m1a belongs actually to the variable gender.
+
+Therefore, there might be a causal relationship between gender and response, but it is possible that education is, in fact, not causally influencing response like previously assumed. Education seems to have no impact on response when gender is included.
+
+In general, in model m2, education has no significant impact, age has a negative impact, and gender has a positive impact on response.
+
+## Exercise 3
+
+The following model was given:
+
+\[y_i \sim Binomial(1, p_i)\]
+\[logit(p_i) = \alpha_{group[i]} + \beta x_i\]
+\[\alpha_{group} \sim Normal(0, 1.5)\]
+\[\beta \sim Normal(0, 0.5)\]
+
+In order to rewrite the following model as a multilevel model, I used a varying intercepts model. Instead of assigning $\alpha_{group}$ to a certain prior distribution like above, the distribution of $\alpha_{group}$ now contains two hyperparameters that are distributed with hyperpriors. This results in the following model:
+
+\[y_i \sim Binomial(1, p_i)\]
+\[logit(p_i) = \alpha_{group[i]} + \beta x_i\]
+\[\alpha_{group} \sim Normal(\overline{\alpha}, \sigma)\]
+\[\overline{\alpha} \sim Normal(0, 1.5)\]
+\[\sigma \sim Exponential(1)\]
+\[\beta \sim Normal(0, 0.5)\]
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
